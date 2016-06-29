@@ -210,7 +210,7 @@
 
 (defn do-buster-think [game ia-data buster ghosts]
   (cond (stunned? buster)
-        (action-stunned)
+        [ia-data (action-stunned)]
         (must-release? buster)
         (if (can-release? game buster)
           [ia-data (action-release)]
@@ -242,8 +242,8 @@
 (defn do-think [game previous-ia-data my-busters other-busters ghosts]
   (let [round-ia-data (update-ia-data previous-ia-data my-busters other-busters ghosts)
         [ia-data actions] (reduce (fn [[ia-data actions] buster]
-                                    (let [[new-data action]
-                                          (do-buster-think game ia-data buster ghosts)]
+                                    (let [x (do-buster-think game ia-data buster ghosts)
+                                          [new-data action] x]
                                       [new-data (conj actions action)]))
                                   [round-ia-data []] my-busters)
         next-ia-data (-> round-ia-data
