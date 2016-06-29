@@ -154,7 +154,8 @@
              closest-other
              (< (d2 closest-other e) MAX_D2_STUN))
       [(-> ia-data
-           (update-in [:busters (:entityId e)] assoc :stun-round (:round ia-data)))
+           (update-in [:busters (:entityId e)] assoc :stun-round (:round ia-data))
+           (assoc :other-busters (remove #{closest-other} others)))
        (action-stun closest-other)]
       (if closest-ghost
         [(-> ia-data
