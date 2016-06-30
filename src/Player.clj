@@ -57,6 +57,9 @@
 (def HOME1 {:x 0 :y 0})
 (def HOME2 {:x 16000 :y 9000})
 (def STUN_RELOAD 20)
+(def GHOST_MOVE_AWAY 400)
+
+(def VISITED_ALIVE_DURATION 50)
 
 (def STATE_IDLE 0)
 (def STATE_CARRYING 1)
@@ -71,12 +74,58 @@
 (defn closest-to-bust [buster ghosts]
   (first (sort-by #(abs (- MIN_D2_BUST (d2 buster %))) ghosts)))
 
+
+;---------------------------------------------------------------
+; GRID
+;---------------------------------------------------------------
+
+(defn grid-cell-diameter [grid]
+  (get grid :diameter))
+
+(defn grid-cells [grid]
+  (vals (get grid :cells)))
+
+(defn generate-grid []
+  (let [sz (* 0.1 FOG_DIAMETER)
+        decal (/ sz 2)
+        cells (for [x (range 0 (dec (/ WIDTH sz)))
+                    y (range 0 (dec (/ HEIGHT sz)))]
+                [[x y] {:x       (+ decal (* x sz))
+                        :y       (+ decal (* y sz))
+                        :visited 0}])
+        cells (into {} cells)]
+    {:diameter sz
+     :cells    cells}))
+
+(defn tick-cells [grid]
+  (let [cells (:cells grid)
+        newCells (reduce (fn [acc [k cell]]
+                           (assoc acc k (update-in cell [:visited] dec))) {} cells)]
+    (assoc grid :cells newCells)))
+
+(defn mark-visited-cells [grid buster]
+  (let [cells (:cells grid)
+        diam (:diameter grid)
+        limit (sqr (- FOG_RADIUS (/ diam 6)))
+        newCells (reduce (fn [acc [k cell]]
+                           (if (< (d2 buster cell) limit)
+                             (assoc acc k (assoc cell :visited VISITED_ALIVE_DURATION))
+                             (assoc acc k cell))) {} cells)]
+    (assoc grid :cells newCells)))
+
+(defn compute-zones-of-interest [grid]
+  grid)
+
+;---------------------------------------------------------------
+
 (defn generate-zones []
   (let [sz (* 0.75 FOG_DIAMETER)]
     (for [x (range 0 (/ WIDTH sz))
           y (range 0 (/ HEIGHT sz))]
       {:x (+ (/ FOG_RADIUS 2) (* x sz))
        :y (+ (/ FOG_RADIUS 2) (* y sz))})))
+
+;---------------------------------------------------------------
 
 (defn init-ia-data [game]
   {:unvisited-zones (generate-zones)
@@ -106,6 +155,14 @@
   (let [ds (d2 e1 e2)]
     (and (<= ds MAX_D2_BUST)
          (<= MIN_D2_BUST ds))))
+
+(defn should-bust? [ghost]
+  (let [nb-busters (:nb-busters ghost)
+        nb-busters (if (nil? nb-busters) 0 nb-busters)
+        stamina (:state ghost)
+        r (< (* 2 nb-busters) stamina)]
+    (debug "should-bust?" r "(" nb-busters " vs " stamina ")")
+    r))
 
 (defn must-release? [buster]
   (= STATE_CARRYING (:state buster)))
@@ -208,21 +265,33 @@
 (defn action-stunned []
   (action-move 1 1 "I'm stunned!"))
 
-(defn do-buster-think [game ia-data buster ghosts]
-  (cond (stunned? buster)
-        [ia-data (action-stunned)]
-        (must-release? buster)
-        (if (can-release? game buster)
-          [ia-data (action-release)]
-          [ia-data (action-move-to-release buster game)])
-        (empty? ghosts)
-        (action-move-random ia-data buster)
-        :else
-        (let [ghosts-bustable (filter #(can-bust? buster %) ghosts)]
-          (if (seq ghosts-bustable)
-            [ia-data (action-bust (first ghosts-bustable))]
-            [ia-data (action-move-away buster (closest-to-bust buster ghosts))]
-            ))))
+(defn one-or-inc [x]
+  (if (nil? x) 1 (inc x)))
+
+(defn do-buster-think [game ia-data buster]
+  (let [ghosts (:round-ghosts ia-data)]
+    (cond (stunned? buster)
+          [ia-data (action-stunned)]
+          (must-release? buster)
+          (if (can-release? game buster)
+            [ia-data (action-release)]
+            [ia-data (action-move-to-release buster game)])
+          (empty? ghosts)
+          (action-move-random ia-data buster)
+          :else
+          (let [ghosts-bustable (filter #(and (can-bust? buster %)
+                                              (should-bust? %)) ghosts)]
+            (if (seq ghosts-bustable)
+              (let [ghost (first ghosts-bustable)
+                    next-ia (-> ia-data
+                                (assoc :round-ghosts
+                                       (map (fn [b] (if (= b ghost)
+                                                      (update-in b [:nb-busters] one-or-inc)
+                                                      b)) ghosts)))]
+                (debug "next-ia" next-ia)
+                [next-ia (action-bust (first ghosts-bustable))])
+              [ia-data (action-move-away buster (closest-to-bust buster ghosts))]
+              )))))
 
 (defn update-ia-data [ia-data my-busters other-busters ghosts]
   (let [unvisited (:unvisited-zones ia-data)
@@ -235,6 +304,7 @@
                                 (into gs (filter #(< (d2 buster %) FOG_RADIUS2) seen-ghosts)))
                               #{} my-busters)]
     (-> ia-data
+        (assoc :round-ghosts ghosts)
         (assoc :ghosts (into ghosts (remove ghosts-in-fog seen-ghosts)))
         (assoc :unvisited-zones (remove visited-zones unvisited))
         (assoc :other-busters other-busters))))
@@ -242,7 +312,7 @@
 (defn do-think [game previous-ia-data my-busters other-busters ghosts]
   (let [round-ia-data (update-ia-data previous-ia-data my-busters other-busters ghosts)
         [ia-data actions] (reduce (fn [[ia-data actions] buster]
-                                    (let [x (do-buster-think game ia-data buster ghosts)
+                                    (let [x (do-buster-think game ia-data buster)
                                           [new-data action] x]
                                       [new-data (conj actions action)]))
                                   [round-ia-data []] my-busters)

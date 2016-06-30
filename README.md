@@ -33,11 +33,11 @@ a ghost outside of your base.
 
 **Ghosts work as follows:**
 
-* Ghosts remain stationary unless busters are within 2200 units of them and they are not in the process of being trapped. In this case, they will move 400 units away from the closest buster. In case of a tie, it'll be the mean position of the busters.
-* If several busters attempt to trap a ghost, the team with the most busters will take priority. Within that team, the closest buster will take the ghost. If both teams have an equal number of busters attempting to trap the ghost, it will not be trapped on that turn.
+* Ghosts remain stationary unless busters are within 2200 units of them and they are not in the process of being trapped. In this case, they will move 400 units away from the mean position of the near busters.
+* If several busters attempt to trap a ghost with 0 stamina, the team with the most busters will take priority. Within that team, the closest buster will take the ghost. If both teams have an equal number of busters attempting to trap the ghost, it will not be trapped on that turn.
 * A ghost being carried by a buster will escape if that buster attempts to trap a different ghost.
-
-The game ends once all ghosts have been captured or after the time limit of 400 turns.
+* Stamina does not regenerate.
+* The game ends once all ghosts have been captured or after the time limit of 400 turns.
 
 The game state of every turn is given to you as a list of entities, each with an id, position, type, state and value.
 
@@ -53,7 +53,8 @@ The state will be:
   * 0: idle or moving buster.
   * 1: buster carrying a ghost.
   * 2: stunned buster.
-* For ghosts, it is always 0.
+  * 3: buster in the process of trapping a ghost.
+* For ghosts, it is equal to the ghost's current stamina.
 
 The value will be:
 
@@ -111,6 +112,14 @@ Response time per turn ≤ 100ms
 What is in store for me in the higher leagues ?
 The extra rule available in higher leagues is:
 Ghosts with endurance, who take several turns to successfully trap.
+
+## Developers
+
+    (require '[clojure.test :refer [run-tests]])
+    (require 'Player-test)
+    (run-tests 'Player-test)
+    
+
 ## License
 
 Copyright © 2016 FIXME
