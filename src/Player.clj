@@ -204,11 +204,14 @@
     (and (<= ds MAX_D2_BUST)
          (<= MIN_D2_BUST ds))))
 
+(defn stamina-of [ghost]
+  (:state ghost))
+
 (defn should-bust? [ghost]
   (let [nb-total-busters (:value ghost)
         nb-busters (:nb-busters ghost)
         nb-busters (if (nil? nb-busters) 0 nb-busters)
-        stamina (:state ghost)
+        stamina (stamina-of ghost)
         r (or
             (< nb-busters 1)
             (and (<= nb-busters nb-total-busters) (= 0 stamina))
@@ -232,37 +235,65 @@
 (defn can-release? [game buster]
   (<= (d2 (my-home game) buster) MAX_D2_RELEASE))
 
-(defn action-release []
-  {:type :release
-   :msg  "go away ectoplasm!"})
-
-(defn action-move
-  ([e ^String msg]
-   (action-move (:x e) (:y e) msg))
-  ([x y ^String msg]
-   {:type :move
-    :x    (int x)
-    :y    (int y)
-    :msg  msg}))
-
-(defn action-stun [target]
-  {:type   :stun
-   :target (:entityId target)
-   :msg    "take that!"})
 
 
-(defn can-stun? [ia-data e]
+(defn number-of-round-to-reach [e1 e2]
+  (let [d (distance e1 e2)
+        nb-round (Math/ceil (/ d MIN_DIST_BUST))]
+    (int nb-round)))
+
+(defn calculate-reachability [buster ghosts]
+  (map #(assoc % :interest (max (stamina-of %)
+                                (number-of-round-to-reach buster %))) ghosts))
+
+(defn sort-by-reachability [buster ghosts]
+  (let [gs (calculate-reachability buster ghosts)
+        ]
+    (debug "interests")
+    (doseq [g gs]
+      (debug "   stamina: " (stamina-of g) " i:" g))
+    (sort-by :interest gs)))
+
+(defn nb-round-before-reload [ia-data buster]
   (let [round (:round ia-data)
-        stun-round (get-in ia-data [:busters (:entityId e) :stun-round])]
-    (or (nil? stun-round)
-        (< STUN_RELOAD (- round stun-round)))))
+        stun-round (get-in ia-data [:busters (:entityId buster) :stun-round])]
+    (if (nil? stun-round)
+      0
+      (max 0 (- (+ stun-round STUN_RELOAD) round)))))
+
+(defn can-stun? [ia-data buster]
+  (= 0 (nb-round-before-reload ia-data buster)))
 
 (defn can-stun-target? [e1 e2]
   (if (and e1 e2)
     (let [d2 (d2 e1 e2)]
-      (and (<= d2 MAX_D2_STUN)
+      (and (< d2 MAX_D2_STUN)
            (<= MIN_D2_STUN d2)))
     false))
+
+(defn action-bust [ia-data buster e]
+  {:type    :bust
+   :ghostId (:entityId e)
+   :msg     (str "Zzzappp! " (nb-round-before-reload ia-data buster))})
+
+(defn action-release [ia-data buster]
+  {:type :release
+   :msg  (str "psschiitt! " (nb-round-before-reload ia-data buster))})
+
+(defn action-move
+  ([ia-data buster e ^String msg]
+   (action-move ia-data buster (:x e) (:y e) msg))
+  ([ia-data buster x y ^String msg]
+   {:type :move
+    :x    (int x)
+    :y    (int y)
+    :msg  (str msg " " (nb-round-before-reload ia-data buster))}))
+
+(defn action-stun [ia-data buster target]
+  {:type   :stun
+   :target (:entityId target)
+   :msg    (str "take that! " (nb-round-before-reload ia-data buster))})
+
 
 (defn action-stun-other [ia-data buster targets]
   (let [others (:round-other-busters ia-data)
@@ -270,38 +301,38 @@
     [(-> ia-data
          (update-in [:busters (:entityId buster)] assoc :stun-round (:round ia-data))
          (assoc :round-other-busters (remove #{target} others)))
-     (action-stun target)]))
+     (action-stun ia-data buster target)]))
 
-(defn action-move-random [ia-data e]
+(defn action-move-random [ia-data buster]
   (let [seen-ghosts (:ghosts ia-data)
-        target-ghost (closest e seen-ghosts)]
+        target-ghost (first (sort-by-reachability buster seen-ghosts))]
     (if (seq target-ghost)
       [ia-data
-       (action-move target-ghost "previously seen!")]
+       (action-move ia-data buster target-ghost "previously seen!")]
 
       (let [zones (:unvisited-zones ia-data)
             grouped (group-by :weight zones)
             unvisited (if (empty? grouped)
                         []
                         (get grouped (apply max (keys grouped))))
-            target-zone (get-in ia-data [:busters (:entityId e) :target-zone])
+            target-zone (get-in ia-data [:busters (:entityId buster) :target-zone])
             preferred-zone (if (or (nil? target-zone)
                                    (not-any? #{target-zone} unvisited))
-                             (farest e unvisited)
+                             (farest buster unvisited)
                              target-zone)]
         (debug "#:preferred unvisited zone '" preferred-zone "' target-zone: " target-zone)
         (if preferred-zone
           [(-> ia-data
                (assoc :unvisited-zones (remove #(= % preferred-zone) zones))
-               (update-in [:busters (:entityId e)] assoc :target-zone preferred-zone))
-           (action-move preferred-zone "let's explore!")]
+               (update-in [:busters (:entityId buster)] assoc :target-zone preferred-zone))
+           (action-move ia-data buster preferred-zone "let's explore!")]
           (let [random (rand-int 360)
                 theta (/ (* Math/PI random) 180)
-                x (+ (:x e) (* MAX_DIST_MOVE (Math/cos theta)))
-                y (+ (:y e) (* MAX_DIST_MOVE (Math/sin theta)))]
-            [ia-data (action-move x y "random move")]))))))
+                x (+ (:x buster) (* MAX_DIST_MOVE (Math/cos theta)))
+                y (+ (:y buster) (* MAX_DIST_MOVE (Math/sin theta)))]
+            [ia-data (action-move ia-data buster x y "random move")]))))))
 
-(defn action-move-away [buster dst]
+(defn action-move-away [ia-data buster dst]
   (let [deltaX (- (:x dst) (:x buster))
         deltaY (- (:y dst) (:y buster))
         dist (Math/sqrt (+ (sqr deltaX) (sqr deltaY)))
@@ -310,10 +341,10 @@
         uy (/ deltaY dist)
         newX (+ (:x buster) (* deltaDist ux))
         newY (+ (:y buster) (* deltaDist uy))]
-    (action-move newX newY (str "one step aside" (distance {:x newX :y newY} buster)))))
+    (action-move ia-data buster newX newY (str "aside"))))
 
 (defn action-move-to-release [ia-data buster game]
-  (action-move (my-home game) "recycling!")
+  (action-move ia-data buster (my-home game) "recycling!")
   ;(let [dh1 (d2 HOME1 buster)
   ;      dh2 (d2 HOME2 buster)]
   ;  (if (< dh1 dh2)
@@ -321,13 +352,8 @@
   ;    (action-move HOME2 "let's trash this")))
   )
 
-(defn action-bust [e]
-  {:type    :bust
-   :ghostId (:entityId e)
-   :msg     "Zzzzap!"})
-
-(defn action-stunned []
-  (action-move 1 1 "stunned!"))
+(defn action-stunned [ia-data buster]
+  (action-move ia-data buster 1 1 "stunned!"))
 
 (defn one-or-inc [x]
   (if (nil? x) 1 (inc x)))
@@ -339,53 +365,46 @@
         closest-ghost (closest buster ghosts)
 
         other-busters (:round-other-busters ia-data)
-        stunnable-busters (filter #(not (stunned? %)) other-busters)
+        stunnable-busters (filter #(and (not (stunned? %))
+                                        (can-stun-target? buster %)) other-busters)
         high-priority-targets (filter #(or (trapping? %)
                                            (carrying? %)) stunnable-busters)
 
-        danger-targets (filter #(can-stun-target? buster %) stunnable-busters)
-
         canStun (can-stun? ia-data buster)
-        canStunTarget (can-stun-target? buster (closest buster stunnable-busters))
-        canStunVipTarget (can-stun-target? buster (closest buster high-priority-targets))
-
 
         _ (debug "---me:" buster)
         _ (debug "   canStun..........:" canStun)
         _ (debug "   VIP..............:" high-priority-targets)
-        _ (debug "   canStun VIP......:" canStunVipTarget)
-        _ (debug "   stunnable targets:" danger-targets)
-        _ (debug "   ghost bustable...:" ghosts-bustable)
-
-        ]
+        _ (debug "   ghost bustable...:" ghosts-bustable)]
     (cond (stunned? buster)
-          [ia-data (action-stunned)]
+          [ia-data (action-stunned ia-data buster)]
+
+          (and canStun
+               (seq high-priority-targets))
+          (action-stun-other ia-data buster high-priority-targets)
 
           (must-release? buster)
           (if (can-release? game buster)
-            [ia-data (action-release)]
-            (if (seq danger-targets)
-              (action-stun-other ia-data buster danger-targets)
+            [ia-data (action-release ia-data buster)]
+            (if (and canStun
+                     (seq stunnable-busters))
+              (action-stun-other ia-data buster stunnable-busters)
               [ia-data (action-move-to-release ia-data buster game)])) ; TODO move away from visible enemies
 
-          (and canStun
-               (seq high-priority-targets)
-               canStunVipTarget)
-          (action-stun-other ia-data buster high-priority-targets)
 
           (and (seq ghosts))
           (if (seq ghosts-bustable)
-            (let [ghost (first ghosts-bustable)
+            (let [ghost (first (sort-by-reachability buster ghosts-bustable))
                   next-ia (-> ia-data
                               (assoc :round-ghosts
                                      (map (fn [b] (if (= b ghost)
                                                     (update-in b [:nb-busters] one-or-inc)
                                                     b)) ghosts)))]
-              [next-ia (action-bust (first ghosts-bustable))])
-            [ia-data (action-move-away buster (closest-to-bust buster ghosts))])
+              [next-ia (action-bust ia-data buster ghost)])
+            [ia-data (action-move-away ia-data buster (closest-to-bust buster ghosts))])
 
           (and canStun
-               canStunTarget)
+               (seq stunnable-busters))
           (action-stun-other ia-data buster stunnable-busters)
 
 
@@ -394,39 +413,55 @@
                (assoc :ghosts (-> (remove #(= % closest-ghost) ghosts)
                                   (conj (assoc closest-ghost :buster (:entityId buster)))))
                (update-in [:busters (:entityId buster)] dissoc :target-zone))
-           (action-move closest-ghost "a ghost!")]
+           (action-move ia-data buster closest-ghost "a ghost!")]
 
           :else
           (action-move-random ia-data buster))))
 
-(defn do-explore [game ia-data e]
-  (let [zones (:unexplored-zones ia-data)
+(defn do-explore [game ia-data buster]
+  (let [other-busters (:round-other-busters ia-data)
+        stunnable-busters (filter #(and (not (stunned? %))
+                                        (can-stun-target? % buster)) other-busters)
+        canStun (can-stun? ia-data buster)
+        ; ---
+
+        zones (:unexplored-zones ia-data)
         ordered (sort-by :order zones)
-        target-zone (get-in ia-data [:busters (:entityId e) :target-zone])
+        target-zone (get-in ia-data [:busters (:entityId buster) :target-zone])
         target-zone (if (or (nil? target-zone)
-                            (< (d2 e target-zone) 50))
+                            (< (d2 buster target-zone) 50))
                       (first ordered)
                       target-zone)
-        _ (debug "---me:" e)
+        _ (debug "---me:" buster)
         _ (debug "   unexplored" zones)
-        _ (debug "   target" target-zone ", d=" (if target-zone (distance target-zone e)))
+        _ (debug "   target" target-zone ", d=" (if target-zone (distance target-zone buster)))
         ]
-    (if target-zone
+    (cond
+      (and canStun
+           (seq stunnable-busters))
+      (action-stun-other ia-data buster stunnable-busters)
+
+      target-zone
       [(-> ia-data
            (assoc :unexplored-zones (remove #(= % target-zone) zones))
-           (update-in [:busters (:entityId e)] assoc :target-zone target-zone))
-       (action-move target-zone "exploring!")]
-      nil)))
+           (update-in [:busters (:entityId buster)] assoc :target-zone target-zone))
+       (action-move ia-data buster target-zone "exploring!")]
+
+      :else
+      [(-> ia-data
+           (update-in [:busters (:entityId buster)] dissoc :target-zone))
+       nil])))
 
 (defn do-buster-think [game ia-data buster]
   (let [role (get-in ia-data [:roles (:entityId buster)])
-        computed (cond
-                   (= :explorer role)
-                   (do-explore game ia-data buster)
-                   :else nil)]
+        [nia-data computed] (cond
+                              (= :explorer role)
+                              (do-explore game ia-data buster)
+                              :else
+                              [ia-data nil])]
     (if computed
-      computed
-      (do-buster-think-0 game ia-data buster))))
+      [nia-data computed]
+      (do-buster-think-0 game nia-data buster))))
 
 
 

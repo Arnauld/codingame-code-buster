@@ -259,3 +259,45 @@
       (doseq [a actions]
         (println a)))))
 
+
+(deftest do-think-case-9
+  (testing "releasing while being explorer..."
+    (let [game {:bustersPerPlayer 2, :ghostCount 9, :myTeamId 0}
+          entities [{:entityId 0, :x 987, :y 6908, :entityType 0, :state 1, :value 5}
+                    {:entityId 1, :x 15090, :y 3023, :entityType 0, :state 0, :value -1}
+                    {:entityId 6, :x 16000, :y 1661, :entityType -1, :state 40, :value 0}]
+          ia-data {:round            141,
+                   :roles            {0 :explorer},
+                   :unvisited-zones  [{:y 4400.0, :weight 100, :order 12, :x 1100.0}
+                                      {:y 1100.0, :weight 10, :order 2, :x 4400.0}
+                                      {:y 4400.0, :weight 10, :order 13, :x 4400.0}
+                                      {:y 7700.0, :weight 10, :order 10, :x 4400.0}
+                                      {:order 3, :x 7700.0, :y 1100.0, :weight 50}
+                                      {:y 4400.0, :weight 10, :order 14, :x 7700.0}
+                                      {:order 9, :x 7700.0, :y 7700.0, :weight 20}
+                                      {:y 1100.0, :weight 10, :order 4, :x 11000.0}
+                                      {:y 4400.0, :weight 10, :order 15, :x 11000.0}
+                                      {:y 7700.0, :weight 10, :order 8, :x 11000.0}
+                                      {:y 4400.0, :weight 10, :order 6, :x 14300.0}],
+                   :unexplored-zones [],
+                   :ghosts           [{:entityId 6, :x 16000, :y 1964, :entityType -1, :state 40, :value 0}],
+                   :busters          {1 {:stun-round 52},
+                                      0 {:target-zone {:order 4, :x 1100.0, :y 7700.0}}}}
+
+          round-ia-data (-> ia-data
+                            (assoc :round 11)
+                            (update-ia-data game entities))
+          [new-ia-data actions] (do-think game round-ia-data)]
+      (is (empty? (filter #(= "exploring" (:msg %))
+                          actions)))
+      (doseq [a actions]
+        (println a)))))
+
+(def entities [{:entityId 0, :x 10439, :y 2380, :entityType 0, :state 0, :value -1}
+               {:entityId 1, :x 5062, :y 3912, :entityType 0, :state 0, :value -1}
+               {:entityId 2, :x 10376, :y 2300, :entityType 0, :state 0, :value -1}
+               {:entityId 3, :x 3150, :y 2753, :entityType 0, :state 0, :value -1}
+               {:entityId 5, :x 2388, :y 2996, :entityType 1, :state 0, :value -1}
+               {:entityId 6, :x 2388, :y 2996, :entityType 1, :state 0, :value -1}
+               {:entityId 7, :x 4479, :y 4822, :entityType 1, :state 0, :value -1}])
+
