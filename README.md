@@ -118,7 +118,11 @@ Ghosts with endurance, who take several turns to successfully trap.
     (require '[clojure.test :refer [run-tests]])
     (require 'Player-test)
     (run-tests 'Player-test)
+    (Player-test/do-think-case-3)
     
+    
+* [Using Potential Fields in a Real-time Strategy Game Scenario](http://aigamedev.com/open/tutorials/potential-fields/)
+* 
 
 ## License
 
